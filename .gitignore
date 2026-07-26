@@ -1,2 +1,22 @@
 /target/
+target_local/
 **/*.rs.bk
+# Soroban CLI / local test output (do not commit)
+contracts/**/test_snapshots/
+contracts/**/.soroban/
+**/.soroban/
+**/snapshots/
+.cargo/
+
+# Coverage output
+coverage_summary.txt
+lcov.info
+
+# Soroban CLI wasm / identity artifacts
+*.wasm
+*.xdr
+
+# Transient PR drafting artifacts
+PR_DESCRIPTION.md
+PULL_REQUEST.md
+.aider*
