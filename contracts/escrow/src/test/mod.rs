@@ -14,9 +14,12 @@ use crate::{
 // --- Submodules ---
 mod accounting_invariants;
 mod approval_expiry;
+mod arbiter_config_view;
+mod arbiter_event;
+mod arbiter_page;
+mod batch_settlement;
 mod bounds_validation;
 mod cancel_contract;
-mod batch_settlement;
 mod client_migration;
 mod contracts;
 mod create_contract_bounds;
@@ -37,8 +40,8 @@ mod release;
 mod release_authorization;
 mod reputation;
 mod rollback;
-mod security;
 mod rustdoc_examples;
+mod security;
 mod ttl_tests;
 
 // --- Shared constants ---
