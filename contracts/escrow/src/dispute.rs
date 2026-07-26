@@ -35,11 +35,22 @@ impl DisputeResolution {
     }
 }
 
+/// Typed result of computing a dispute resolution's payouts, replacing the
+/// previous untyped `(i128, i128)` tuple return.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputePayouts {
+    /// Amount refunded back to the client.
+    pub client_payout: i128,
+    /// Amount released to the freelancer.
+    pub freelancer_payout: i128,
+}
+
 #[allow(dead_code)]
 pub fn resolution_payouts(
     contract: &Contract,
     resolution: &DisputeResolution,
-) -> Result<(i128, i128), Error> {
+) -> Result<DisputePayouts, Error> {
     let available = contract
         .funded_amount
         .checked_sub(contract.released_amount)
@@ -50,15 +61,24 @@ pub fn resolution_payouts(
     }
 
     match resolution {
-        DisputeResolution::FullRefund => Ok((available, 0)),
+        DisputeResolution::FullRefund => Ok(DisputePayouts {
+            client_payout: available,
+            freelancer_payout: 0,
+        }),
         DisputeResolution::PartialRefund => {
             let freelancer_payout = available
                 .checked_mul(30)
                 .and_then(|value| value.checked_div(100))
                 .ok_or(Error::PotentialOverflow)?;
-            Ok((available - freelancer_payout, freelancer_payout))
+            Ok(DisputePayouts {
+                client_payout: available - freelancer_payout,
+                freelancer_payout,
+            })
         }
-        DisputeResolution::FullPayout => Ok((0, available)),
+        DisputeResolution::FullPayout => Ok(DisputePayouts {
+            client_payout: 0,
+            freelancer_payout: available,
+        }),
         DisputeResolution::Split(client_amount, freelancer_amount) => {
             if *client_amount < 0 || *freelancer_amount < 0 {
                 return Err(Error::InvalidDisputeSplit);
@@ -68,7 +88,10 @@ pub fn resolution_payouts(
             if total != available {
                 return Err(Error::InvalidDisputeSplit);
             }
-            Ok((*client_amount, *freelancer_amount))
+            Ok(DisputePayouts {
+                client_payout: *client_amount,
+                freelancer_payout: *freelancer_amount,
+            })
         }
     }
 }
@@ -143,8 +166,10 @@ impl Escrow {
             env.panic_with_error(Error::UnauthorizedRole);
         }
 
-        let (client_payout, freelancer_payout) = resolution_payouts(&contract, &resolution)
+        let payouts = resolution_payouts(&contract, &resolution)
             .unwrap_or_else(|err| env.panic_with_error(err));
+        let client_payout = payouts.client_payout;
+        let freelancer_payout = payouts.freelancer_payout;
 
         contract.refunded_amount = safe_add_amounts(contract.refunded_amount, client_payout)
             .unwrap_or_else(|| env.panic_with_error(Error::PotentialOverflow));
