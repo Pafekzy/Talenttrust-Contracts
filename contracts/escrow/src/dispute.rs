@@ -8,8 +8,9 @@
 //! [`DISPUTE_STORAGE_VERSION`].
 
 use crate::{
-    safe_add_amounts, Contract, ContractStatus, DataKey, DisputeMetadata, DisputeMetadataV0,
-    DisputeResolution, DisputeSplit, Error, Escrow, EscrowError, DISPUTE_STORAGE_VERSION,
+    safe_add_amounts, Contract, ContractStatus, DataKey, DisputeConfig, DisputeMetadata,
+    DisputeMetadataV0, DisputeResolution, DisputeSplit, Error, Escrow, EscrowError,
+    DISPUTE_STORAGE_VERSION,
 };
 use soroban_sdk::{symbol_short, Address, BytesN, Env};
 
@@ -21,9 +22,7 @@ use soroban_sdk::{symbol_short, Address, BytesN, Env};
 /// Returns sensible default (`partial_refund_freelancer_share_bps = 3000`, `partial_refund_client_share_bps = 7000`)
 /// before initialization or if storage is unconfigured.
 pub fn get_dispute_config(env: &Env) -> Option<DisputeConfig> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::DisputeConfigKey)
+    env.storage().persistent().get(&DataKey::DisputeConfigKey)
 }
 
 /// Storage writer for disputes configuration.

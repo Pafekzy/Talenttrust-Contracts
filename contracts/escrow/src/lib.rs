@@ -93,9 +93,7 @@ pub use ttl::{ADMIN_ROTATION_MIN_DELAY_LEDGERS, PENDING_MIGRATION_TTL_LEDGERS};
 // Symbol("milestones"))` key inline. Centralising access gives a single
 // point of truth for the key shape, the missing-entry error path, and
 // the persistent-TTL bump parameters used by every read and write.
-pub use ttl::{
-    load_milestones, milestone_storage_key, store_milestones, try_load_milestones,
-};
+pub use ttl::{load_milestones, milestone_storage_key, store_milestones, try_load_milestones};
 // Keep shared storage keys and escrow domain types centralized in `types.rs`.
 // `DisputeResolution` and `DisputeSplit` are defined once in `types.rs` and
 // re-exported here; `dispute.rs` uses them via `crate::DisputeResolution`.
@@ -247,16 +245,30 @@ impl Escrow {
     }
 
     pub(crate) fn require_not_paused(env: &Env) {
-        if env.storage().persistent().get::<_, bool>(&DataKey::Paused).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
             env.panic_with_error(EscrowError::ContractPaused);
         }
-        if env.storage().persistent().get::<_, bool>(&DataKey::Emergency).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::Emergency)
+            .unwrap_or(false)
+        {
             env.panic_with_error(EscrowError::EmergencyActive);
         }
     }
 
     pub(crate) fn require_not_finalized(env: &Env, contract_id: u32) {
-        if env.storage().persistent().has(&DataKey::Finalization(contract_id)) {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Finalization(contract_id))
+        {
             env.panic_with_error(EscrowError::AlreadyFinalized);
         }
     }
@@ -643,10 +655,8 @@ impl Escrow {
     /// initialization the governed fields fall back to sensible defaults so
     /// callers can always read a complete configuration without panicking.
     pub fn get_milestones_config(env: Env) -> MilestonesConfig {
-        let governed: Option<GovernedParameters> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::GovernedParameters);
+        let governed: Option<GovernedParameters> =
+            env.storage().persistent().get(&DataKey::GovernedParameters);
         MilestonesConfig {
             max_milestones: MAX_MILESTONES,
             max_single_milestone_stroops: MAX_SINGLE_AMOUNT_STROOPS,
@@ -2473,9 +2483,10 @@ impl Escrow {
                 v
             });
         stored_schedules.set(milestone_index, Some(entry));
-        env.storage()
-            .persistent()
-            .set(&(DataKey::Contract(contract_id), schedule_key), &stored_schedules);
+        env.storage().persistent().set(
+            &(DataKey::Contract(contract_id), schedule_key),
+            &stored_schedules,
+        );
 
         true
     }
@@ -2897,8 +2908,8 @@ impl Escrow {
                 &refund_amount,
             );
         }
-            .persistent()
-            .set(&DataKey::Contract(contract_id), &contract);
+        .persistent()
+        .set(&DataKey::Contract(contract_id), &contract);
 
         events::emit_contract_indexed_event(&env, contract_id, &contract);
         ttl::extend_contract_ttl(&env, contract_id);
@@ -3108,7 +3119,9 @@ impl Escrow {
             ttl::PERSISTENT_TTL_LEDGERS,
         );
 
-        let pending_key = DataKey::PendingReputationCredits(ReputationKey { user: contract.freelancer.clone() });
+        let pending_key = DataKey::PendingReputationCredits(ReputationKey {
+            user: contract.freelancer.clone(),
+        });
         let pending: i128 = env.storage().persistent().get(&pending_key).unwrap_or(0);
         if pending <= 0 {
             env.panic_with_error(EscrowError::InvalidState);
@@ -3117,7 +3130,9 @@ impl Escrow {
             .persistent()
             .set(&pending_key, &(pending - REPUTATION_CREDIT_INCREMENT));
 
-        let rep_key = DataKey::Reputation(ReputationKey { user: contract.freelancer.clone() });
+        let rep_key = DataKey::Reputation(ReputationKey {
+            user: contract.freelancer.clone(),
+        });
         let mut rep: types::Reputation =
             env.storage().persistent().get(&rep_key).unwrap_or_default();
         rep.completed_contracts += REPUTATION_CREDIT_INCREMENT;
@@ -3459,7 +3474,9 @@ impl Escrow {
     pub fn get_pending_reputation_credits(env: Env, address: Address) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::PendingReputationCredits(ReputationKey { user: address }))
+            .get(&DataKey::PendingReputationCredits(ReputationKey {
+                user: address,
+            }))
             .unwrap_or(0)
     }
 
@@ -4070,6 +4087,56 @@ impl Escrow {
             (contract_id, resolution.code()),
         );
 
+        true
+    }
+
+    /// Returns the current arbiter dispute-split configuration.
+    ///
+    /// If no configuration has been stored yet, returns the protocol default:
+    /// `partial_refund_freelancer_bps = 3000`, `partial_refund_client_bps = 7000`.
+    pub fn get_arbiter_config(env: Env) -> DisputeConfig {
+        dispute::get_dispute_config(&env).unwrap_or_default()
+    }
+
+    /// Sets the arbiter dispute-split configuration. Admin-only.
+    ///
+    /// `freelancer_bps + client_bps` must equal exactly 10 000 and each value
+    /// must be `<= 10 000`. Takes effect immediately for the next dispute
+    /// resolution that uses `PartialRefund`.
+    ///
+    /// # Errors
+    /// * `NotInitialized` — contract not yet initialized.
+    /// * `UnauthorizedRole` — caller is not the stored admin.
+    /// * `InvalidProtocolParameters` — bps values fail the sum-to-10 000 check.
+    ///
+    /// # Events
+    /// `(Symbol("arbiter_cfg"),)` → `(freelancer_bps, client_bps, admin, timestamp)`
+    pub fn set_arbiter_config(env: Env, freelancer_bps: u32, client_bps: u32) -> bool {
+        Self::require_initialized(&env);
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| env.panic_with_error(EscrowError::NotInitialized));
+        admin.require_auth();
+
+        if freelancer_bps > 10_000 || client_bps > 10_000 {
+            env.panic_with_error(types::EscrowError::InvalidProtocolParameters);
+        }
+        if freelancer_bps.saturating_add(client_bps) != 10_000 {
+            env.panic_with_error(types::EscrowError::InvalidProtocolParameters);
+        }
+
+        let config = DisputeConfig {
+            partial_refund_freelancer_bps: freelancer_bps,
+            partial_refund_client_bps: client_bps,
+        };
+        dispute::set_dispute_config(&env, config);
+
+        env.events().publish(
+            (Symbol::new(&env, "arbiter_cfg"),),
+            (freelancer_bps, client_bps, admin, env.ledger().timestamp()),
+        );
         true
     }
 }
