@@ -200,7 +200,7 @@ mod released_count_parity {
     }
 
     /// Assert count in summary equals count of `released` flags in milestone summaries.
-    fn assert_parity(count: u32, milestones: &soroban_sdk::Vec<crate::MilestoneSummary>) {
+    fn assert_parity(count: u32, milestones: &soroban_sdk::Vec<crate::types::MilestoneSummary>) {
         let from_vec = milestones.iter().filter(|m| m.released).count() as u32;
         assert_eq!(
             count, from_vec,

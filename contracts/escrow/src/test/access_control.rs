@@ -1,5 +1,5 @@
 use super::{default_milestones, generated_participants, register_client, total_milestones};
-use crate::{Error, MAX_RATING, MIN_RATING, ReleaseAuthorization};
+use crate::{Error, ReleaseAuthorization};
 use soroban_sdk::{testutils::Address as _, Env};
 
 #[test]
@@ -91,7 +91,7 @@ fn test_only_client_can_issue_reputation() {
     assert!(client.approve_milestone_release(&contract_id, &client_addr, &2));
     assert!(client.release_milestone(&contract_id, &client_addr, &2));
 
-    let result = client.try_issue_reputation(&contract_id, &freelancer_addr, &freelancer_addr, &MAX_RATING);
+    let result = client.try_issue_reputation(&contract_id, &freelancer_addr, &freelancer_addr, &5);
     assert_eq!(result, Err(Ok(Error::UnauthorizedRole)));
 }
 
@@ -120,7 +120,7 @@ fn test_issue_reputation_rejects_freelancer_mismatch() {
     assert!(client.approve_milestone_release(&contract_id, &client_addr, &2));
     assert!(client.release_milestone(&contract_id, &client_addr, &2));
 
-    let result = client.try_issue_reputation(&contract_id, &client_addr, &wrong_freelancer, &MAX_RATING);
+    let result = client.try_issue_reputation(&contract_id, &client_addr, &wrong_freelancer, &5);
     assert_eq!(result, Err(Ok(Error::FreelancerMismatch)));
 }
 
@@ -399,7 +399,7 @@ fn test_issue_reputation_rejects_invalid_rating() {
     assert!(client.approve_milestone_release(&contract_id, &client_addr, &2));
     assert!(client.release_milestone(&contract_id, &client_addr, &2));
 
-    let result = client.try_issue_reputation(&contract_id, &client_addr, &freelancer_addr, &(MIN_RATING - 1));
+    let result = client.try_issue_reputation(&contract_id, &client_addr, &freelancer_addr, &0);
     assert_eq!(result, Err(Ok(Error::InvalidRating)));
 }
 
@@ -418,7 +418,7 @@ fn test_issue_reputation_requires_completed_contract() {
         &ReleaseAuthorization::ClientOnly,
     );
 
-    let result = client.try_issue_reputation(&contract_id, &client_addr, &freelancer_addr, &MAX_RATING);
+    let result = client.try_issue_reputation(&contract_id, &client_addr, &freelancer_addr, &5);
     assert_eq!(result, Err(Ok(Error::InvalidState)));
 }
 
@@ -445,7 +445,7 @@ fn test_issue_reputation_rejects_duplicate_issuance() {
     assert!(client.approve_milestone_release(&contract_id, &client_addr, &2));
     assert!(client.release_milestone(&contract_id, &client_addr, &2));
 
-    assert!(client.issue_reputation(&contract_id, &client_addr, &freelancer_addr, &MAX_RATING));
+    assert!(client.issue_reputation(&contract_id, &client_addr, &freelancer_addr, &5));
     let result = client.try_issue_reputation(&contract_id, &client_addr, &freelancer_addr, &4);
     assert_eq!(result, Err(Ok(Error::ReputationAlreadyIssued)));
 }

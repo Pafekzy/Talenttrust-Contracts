@@ -353,7 +353,7 @@ fn migration_blocked_on_refunded_contract() {
 
     assert_contract_error(
         client.try_propose_client_migration(&id, &client_addr, &new_client),
-        crate::Error::InvalidStatusTransition,
+        EscrowError::InvalidStatusTransition,
     );
 }
 
@@ -373,7 +373,7 @@ fn migration_blocked_on_disputed_contract() {
 
     assert_contract_error(
         client.try_propose_client_migration(&id, &client_addr, &new_client),
-        crate::Error::InvalidStatusTransition,
+        EscrowError::InvalidStatusTransition,
     );
 }
 

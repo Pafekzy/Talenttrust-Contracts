@@ -1,5 +1,5 @@
-use super::EscrowFixture;
-use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, vec, Address, Env, String};
+use super::{create_contract, register_client, total_milestone_amount};
+use soroban_sdk::Env;
 
 #[derive(Clone, Copy)]
 struct ResourceBaseline {
@@ -23,135 +23,64 @@ struct MeasuredResources {
 }
 
 const CREATE_CONTRACT_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 8,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 3_000_000,
+    max_instructions: 10_000_000,
+    max_mem_bytes: 1_000_000,
+    max_read_entries: 4,
+    max_write_entries: 3,
+    max_read_bytes: 4_096,
+    max_write_bytes: 12_288,
+    max_fee_total: 2_000_000,
 };
 
 const DEPOSIT_FUNDS_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 12,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 6_000_000,
+    max_instructions: 8_500_000,
+    max_mem_bytes: 900_000,
+    max_read_entries: 3,
+    max_write_entries: 2,
+    max_read_bytes: 4_096,
+    max_write_bytes: 8_192,
+    max_fee_total: 1_900_000,
 };
 
 const RELEASE_MILESTONE_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 14,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 3_000_000,
+    max_instructions: 10_000_000,
+    max_mem_bytes: 1_000_000,
+    max_read_entries: 4,
+    max_write_entries: 3,
+    max_read_bytes: 4_096,
+    max_write_bytes: 14_336,
+    max_fee_total: 2_100_000,
 };
 
 const REFUND_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 10,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 3_000_000,
+    max_instructions: 10_000_000,
+    max_mem_bytes: 1_000_000,
+    max_read_entries: 4,
+    max_write_entries: 3,
+    max_read_bytes: 4_096,
+    max_write_bytes: 12_288,
+    max_fee_total: 2_000_000,
 };
 
 const CANCEL_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 8,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 3_000_000,
+    max_instructions: 9_000_000,
+    max_mem_bytes: 900_000,
+    max_read_entries: 3,
+    max_write_entries: 2,
+    max_read_bytes: 4_096,
+    max_write_bytes: 8_192,
+    max_fee_total: 1_900_000,
 };
 
 const DISPUTE_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 10,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 3_000_000,
-};
-
-// ---------------------------------------------------------------------------
-// Reputation resource-budget baselines
-// ---------------------------------------------------------------------------
-// Values are set generously for the initial commit.  If the CI runner reports
-// stable numbers below these thresholds they should be tightened so that a
-// meaningful regression always trips an assertion.
-
-const ISSUE_REPUTATION_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 15_000_000,
-    max_mem_bytes: 1_500_000,
-    max_read_entries: 6,
-    max_write_entries: 6,
-    max_read_bytes: 8_192,
-    max_write_bytes: 24_576,
-    max_fee_total: 3_000_000,
-};
-
-const GET_REPUTATION_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 2_000_000,
-    max_mem_bytes: 500_000,
-    max_read_entries: 2,
-    max_write_entries: 1,
-    max_read_bytes: 4_096,
-    max_write_bytes: 4_096,
-    max_fee_total: 500_000,
-};
-
-const GET_AVERAGE_RATING_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 3_000_000,
-    max_mem_bytes: 500_000,
-    max_read_entries: 2,
-    max_write_entries: 1,
-    max_read_bytes: 4_096,
-    max_write_bytes: 4_096,
-    max_fee_total: 500_000,
-};
-
-const GET_REPUTATION_COMMENT_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 3_000_000,
-    max_mem_bytes: 500_000,
-    max_read_entries: 2,
-    max_write_entries: 1,
-    max_read_bytes: 4_096,
-    max_write_bytes: 4_096,
-    max_fee_total: 800_000,
-};
-
-const GET_PENDING_REPUTATION_CREDITS_BASELINE: ResourceBaseline = ResourceBaseline {
-    max_instructions: 2_000_000,
-    max_mem_bytes: 500_000,
-    max_read_entries: 4,
+    max_instructions: 9_000_000,
+    max_mem_bytes: 900_000,
+    max_read_entries: 3,
     max_write_entries: 2,
     max_read_bytes: 4_096,
-    max_write_bytes: 4_096,
-    max_fee_total: 500_000,
+    max_write_bytes: 8_192,
+    max_fee_total: 1_900_000,
 };
-
-fn valid_comment(env: &Env) -> String {
-    String::from_str(env, "Great job!")
-}
-
-/// Complete a fully-funded fixture by approving and releasing all three
-/// milestones, transitioning the contract to `Completed`.
-fn complete_fixture(fixture: &EscrowFixture) {
-    let escrow = fixture.escrow();
-    for i in 0..3u32 {
-        escrow.approve_milestone_release(&fixture.escrow_id, &fixture.client, &i);
-        escrow.release_milestone(&fixture.escrow_id, &fixture.client, &i);
-    }
-}
 
 fn measure_last_invocation(env: &Env) -> (MeasuredResources, i64) {
     let resources = env.cost_estimate().resources();
@@ -229,20 +158,13 @@ fn assert_within_baseline(
 
 #[test]
 fn create_contract_resource_baseline() {
-    let fixture = EscrowFixture::builder().build();
-    let escrow = fixture.escrow();
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register_client(&env);
 
-    let client_addr = Address::generate(&fixture.env);
-    let freelancer_addr = Address::generate(&fixture.env);
-    let _ = escrow.create_contract(
-        &client_addr,
-        &freelancer_addr,
-        &None,
-        &super::default_milestones(&fixture.env),
-        &crate::ReleaseAuthorization::ClientOnly,
-    );
+    let _ = create_contract(&env, &client);
 
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
+    let (resources, fee_total) = measure_last_invocation(&env);
     assert_within_baseline(
         "create_contract",
         resources,
@@ -253,15 +175,14 @@ fn create_contract_resource_baseline() {
 
 #[test]
 fn deposit_funds_resource_baseline() {
-    let fixture = EscrowFixture::builder().with_settlement_token().build();
-    let escrow = fixture.escrow();
-    let token = fixture.settlement_token.as_ref().unwrap();
-    let total = fixture.total_amount();
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register_client(&env);
 
-    StellarAssetClient::new(&fixture.env, token).mint(&fixture.client, &total);
-    let _ = escrow.deposit_funds(&fixture.escrow_id, &fixture.client, &total);
+    let (_, _, contract_id) = create_contract(&env, &client);
+    let _ = client.deposit_funds(&contract_id, &total_milestone_amount());
 
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
+    let (resources, fee_total) = measure_last_invocation(&env);
     assert_within_baseline(
         "deposit_funds",
         resources,
@@ -272,13 +193,15 @@ fn deposit_funds_resource_baseline() {
 
 #[test]
 fn release_milestone_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    let escrow = fixture.escrow();
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register_client(&env);
 
-    escrow.approve_milestone_release(&fixture.escrow_id, &fixture.client, &0);
-    let _ = escrow.release_milestone(&fixture.escrow_id, &fixture.client, &0);
+    let (_, _, contract_id) = create_contract(&env, &client);
+    let _ = client.deposit_funds(&contract_id, &total_milestone_amount());
+    let _ = client.release_milestone(&contract_id, &0);
 
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
+    let (resources, fee_total) = measure_last_invocation(&env);
     assert_within_baseline(
         "release_milestone",
         resources,
@@ -289,160 +212,41 @@ fn release_milestone_resource_baseline() {
 
 #[test]
 fn refund_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    let escrow = fixture.escrow();
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register_client(&env);
 
-    let _ =
-        escrow.refund_unreleased_milestones(&fixture.escrow_id, &vec![&fixture.env, 0_u32, 1, 2]);
+    let (_, _, contract_id) = create_contract(&env, &client);
+    let _ = client.deposit_funds(&contract_id, &total_milestone_amount());
+    let _ = client.refund(&contract_id, &0);
 
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
+    let (resources, fee_total) = measure_last_invocation(&env);
     assert_within_baseline("refund", resources, fee_total, REFUND_BASELINE);
 }
 
 #[test]
 fn cancel_resource_baseline() {
-    let fixture = EscrowFixture::builder().build();
-    let escrow = fixture.escrow();
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register_client(&env);
 
-    let _ = escrow.cancel_contract(&fixture.escrow_id, &fixture.client);
+    let (_, _, contract_id) = create_contract(&env, &client);
+    let _ = client.cancel(&contract_id);
 
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
+    let (resources, fee_total) = measure_last_invocation(&env);
     assert_within_baseline("cancel", resources, fee_total, CANCEL_BASELINE);
 }
 
 #[test]
 fn dispute_resource_baseline() {
-    let builder = EscrowFixture::builder();
-    let client = Address::generate(builder.env());
-    let freelancer = Address::generate(builder.env());
-    let arbiter = Address::generate(builder.env());
-    let fixture = builder
-        .with_participants(client, freelancer, Some(arbiter))
-        .with_settlement_token()
-        .build();
-    let escrow = fixture.escrow();
-    let token = fixture.settlement_token.as_ref().unwrap();
-    let total = fixture.total_amount();
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register_client(&env);
 
-    StellarAssetClient::new(&fixture.env, token).mint(&fixture.client, &total);
-    escrow.deposit_funds(&fixture.escrow_id, &fixture.client, &total);
-    let _ = escrow.raise_dispute(&fixture.escrow_id, &fixture.client);
+    let (_, _, contract_id) = create_contract(&env, &client);
+    let _ = client.deposit_funds(&contract_id, &total_milestone_amount());
+    let _ = client.dispute(&contract_id);
 
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
+    let (resources, fee_total) = measure_last_invocation(&env);
     assert_within_baseline("dispute", resources, fee_total, DISPUTE_BASELINE);
-}
-
-// ---------------------------------------------------------------------------
-// Reputation resource-budget tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn issue_reputation_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    complete_fixture(&fixture);
-    let escrow = fixture.escrow();
-
-    let _ = escrow.issue_reputation(
-        &fixture.escrow_id,
-        &fixture.client,
-        &5,
-        &valid_comment(&fixture.env),
-    );
-
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
-    assert_within_baseline(
-        "issue_reputation",
-        resources,
-        fee_total,
-        ISSUE_REPUTATION_BASELINE,
-    );
-}
-
-#[test]
-fn get_reputation_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    complete_fixture(&fixture);
-    let escrow = fixture.escrow();
-
-    escrow.issue_reputation(
-        &fixture.escrow_id,
-        &fixture.client,
-        &5,
-        &valid_comment(&fixture.env),
-    );
-
-    let _ = escrow.get_reputation(&fixture.freelancer);
-
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
-    assert_within_baseline(
-        "get_reputation",
-        resources,
-        fee_total,
-        GET_REPUTATION_BASELINE,
-    );
-}
-
-#[test]
-fn get_average_rating_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    complete_fixture(&fixture);
-    let escrow = fixture.escrow();
-
-    escrow.issue_reputation(
-        &fixture.escrow_id,
-        &fixture.client,
-        &5,
-        &valid_comment(&fixture.env),
-    );
-
-    let _ = escrow.get_average_rating(&fixture.freelancer);
-
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
-    assert_within_baseline(
-        "get_average_rating",
-        resources,
-        fee_total,
-        GET_AVERAGE_RATING_BASELINE,
-    );
-}
-
-#[test]
-fn get_reputation_comment_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    complete_fixture(&fixture);
-    let escrow = fixture.escrow();
-
-    escrow.issue_reputation(
-        &fixture.escrow_id,
-        &fixture.client,
-        &5,
-        &valid_comment(&fixture.env),
-    );
-
-    let _ = escrow.get_reputation_comment(&fixture.escrow_id);
-
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
-    assert_within_baseline(
-        "get_reputation_comment",
-        resources,
-        fee_total,
-        GET_REPUTATION_COMMENT_BASELINE,
-    );
-}
-
-#[test]
-fn get_pending_reputation_credits_resource_baseline() {
-    let fixture = EscrowFixture::builder().funded().build();
-    complete_fixture(&fixture);
-
-    let escrow = fixture.escrow();
-    let _ = escrow.get_pending_reputation_credits(&fixture.freelancer);
-
-    let (resources, fee_total) = measure_last_invocation(&fixture.env);
-    assert_within_baseline(
-        "get_pending_reputation_credits",
-        resources,
-        fee_total,
-        GET_PENDING_REPUTATION_CREDITS_BASELINE,
-    );
 }

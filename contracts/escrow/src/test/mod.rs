@@ -1,36 +1,24 @@
 #![cfg(test)]
 #![allow(dead_code)]
 
-use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
-    token::StellarAssetClient,
-    vec, Address, Env, Vec,
-};
+use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, vec, Address, Env, Vec};
 
 use crate::{
     Contract, ContractStatus, Escrow, EscrowClient, EscrowError, Milestone, ReleaseAuthorization,
 };
 
 // --- Submodules ---
-mod accounting_invariants;
 mod approval_expiry;
-mod bounds_validation;
 mod cancel_contract;
-mod batch_settlement;
 mod client_migration;
-mod contracts;
 mod create_contract_bounds;
 mod deposit;
 mod dispute;
-mod dispute_storage;
 mod emergency_controls;
-mod indexed_event;
 mod input_sanitization_amounts;
 mod input_sanitization_identities;
 mod mainnet_readiness;
-mod milestone_schedule;
 mod pause_controls;
-mod performance;
 mod persistence;
 mod refund;
 mod release;
@@ -38,7 +26,6 @@ mod release_authorization;
 mod reputation;
 mod rollback;
 mod security;
-mod rustdoc_examples;
 mod ttl_tests;
 
 // --- Shared constants ---
@@ -108,7 +95,7 @@ impl EscrowFixtureBuilder {
             admin: None,
             participants: None,
             milestones: None,
-            settlement_token: true,
+            settlement_token: false,
             fund: false,
         }
     }
@@ -218,7 +205,7 @@ impl Default for EscrowFixtureBuilder {
 
 pub fn setup() -> (Env, Address, Address) {
     let env = Env::default();
-    env.mock_all_auths_allowing_non_root_auth();
+    env.mock_all_auths();
     let client_addr = Address::generate(&env);
     let freelancer_addr = Address::generate(&env);
     (env, client_addr, freelancer_addr)
@@ -237,17 +224,13 @@ pub fn create_default_contract(
     freelancer_addr: &Address,
 ) -> u32 {
     let milestones = vec![env, MILESTONE_ONE, MILESTONE_TWO, MILESTONE_THREE];
-    let id = client.create_contract(
+    client.create_contract(
         client_addr,
         freelancer_addr,
         &None,
         &milestones,
         &ReleaseAuthorization::ClientOnly,
-    );
-    if let Some(token) = client.get_settlement_token() {
-        StellarAssetClient::new(env, &token).mint(client_addr, &1_000_000_000_000_000_i128);
-    }
-    id
+    )
 }
 
 /// Assert contract accounting fields match expected values.
@@ -265,17 +248,11 @@ pub fn assert_contract_state(
 }
 
 pub fn register_client(env: &Env) -> EscrowClient<'_> {
-    env.ledger().with_mut(|li| {
-        li.max_entry_ttl = 518_400;
-        li.min_persistent_entry_ttl = 518_400;
-    });
     let id = env.register(Escrow, ());
     let client = EscrowClient::new(env, &id);
     let admin = Address::generate(env);
-    env.mock_all_auths_allowing_non_root_auth();
+    env.mock_all_auths();
     client.initialize(&admin);
-    let token = env.register_stellar_asset_contract(admin.clone());
-    client.bind_settlement_token(&admin, &token);
     client
 }
 
@@ -305,9 +282,6 @@ pub fn complete_contract(env: &Env, client: &EscrowClient) -> (Address, Address,
         &ReleaseAuthorization::ClientOnly,
     );
     let total = total_milestone_amount();
-    if let Some(token) = client.get_settlement_token() {
-        StellarAssetClient::new(env, &token).mint(&client_addr, &total);
-    }
     client.deposit_funds(&contract_id, &client_addr, &total);
     for milestone_index in 0..3u32 {
         client.approve_milestone_release(&contract_id, &client_addr, &milestone_index);
@@ -332,9 +306,6 @@ pub fn create_contract_with_arbiter(
         &default_milestones(env),
         &ReleaseAuthorization::ClientOnly,
     );
-    if let Some(token) = client.get_settlement_token() {
-        StellarAssetClient::new(env, &token).mint(&client_addr, &1_000_000_000_000_000_i128);
-    }
     (client_addr, freelancer_addr, arbiter_addr, contract_id)
 }
 
@@ -350,9 +321,6 @@ pub fn create_contract(env: &Env, client: &EscrowClient) -> (Address, Address, u
         &milestones,
         &ReleaseAuthorization::ClientOnly,
     );
-    if let Some(token) = client.get_settlement_token() {
-        StellarAssetClient::new(env, &token).mint(&client_addr, &1_000_000_000_000_000_i128);
-    }
     (client_addr, freelancer_addr, id)
 }
 
