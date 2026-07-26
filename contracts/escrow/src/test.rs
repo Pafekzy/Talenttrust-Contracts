@@ -32,7 +32,7 @@ fn test_deposit_funds() {
     let contract_id = env.register(Escrow, ());
     let client = EscrowClient::new(&env, &contract_id);
 
-    let result = client.deposit_funds(&1, &1_000_0000000);
+    let result = client.deposit_funds(&1, &10_000_000_000);
     assert!(result);
 }
 
