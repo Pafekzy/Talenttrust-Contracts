@@ -39,7 +39,7 @@ fn participant_index_client_and_freelancer_lists_are_correct_and_paginated() {
         &freelancer1,
         &None,
         &milestones,
-        &crate::ReleaseAuthorization::ClientOnly,
+        &crate::types::ReleaseAuthorization::ClientOnly,
     );
 
     let id2 = escrow.create_contract(
@@ -47,7 +47,7 @@ fn participant_index_client_and_freelancer_lists_are_correct_and_paginated() {
         &freelancer2,
         &None,
         &milestones,
-        &crate::ReleaseAuthorization::ClientOnly,
+        &crate::types::ReleaseAuthorization::ClientOnly,
     );
 
     // Client pagination for client1: should contain only id1.
