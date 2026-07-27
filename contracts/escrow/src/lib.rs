@@ -84,9 +84,9 @@ pub use ttl::{ADMIN_ROTATION_MIN_DELAY_LEDGERS, PENDING_MIGRATION_TTL_LEDGERS};
 // re-exported here; `dispute.rs` uses them via `crate::DisputeResolution`.
 pub use types::{
     Contract, ContractBounds, ContractStatus, ContractSummary, DataKey, DepositMode,
-    DisputeResolution, DisputeSplit, Error, GovernedParameters, Milestone, MilestoneApprovals,
-    MilestoneSummary, PendingAdminProposal, ReadinessChecklist, ReleaseAuthorization, Reputation,
-    SplitAmounts, CONTRACT_SUMMARY_SCHEMA_VERSION,
+    DisputeConfig, DisputeResolution, DisputeSplit, Error, GovernedParameters, Milestone,
+    MilestoneApprovals, MilestoneSummary, PendingAdminProposal, ReadinessChecklist,
+    ReleaseAuthorization, Reputation, SplitAmounts, CONTRACT_SUMMARY_SCHEMA_VERSION,
 };
 
 // Maximum bounds constants - re-export from amount_validation for API visibility
@@ -437,7 +437,10 @@ impl Escrow {
         }
     }
 
-    /// Returns the current arbiter refund split configuration.
+    /// Returns the current arbiter dispute-split configuration.
+    ///
+    /// If no configuration has been stored yet, returns the protocol default:
+    /// `partial_refund_freelancer_bps = 3000`, `partial_refund_client_bps = 7000`.
     pub fn get_arbiter_config(env: Env) -> DisputeConfig {
         dispute::get_dispute_config(&env).unwrap_or_default()
     }
@@ -2375,14 +2378,6 @@ impl Escrow {
         );
 
         true
-    }
-
-    /// Returns the current arbiter dispute-split configuration.
-    ///
-    /// If no configuration has been stored yet, returns the protocol default:
-    /// `partial_refund_freelancer_bps = 3000`, `partial_refund_client_bps = 7000`.
-    pub fn get_arbiter_config(env: Env) -> DisputeConfig {
-        dispute::get_dispute_config(&env).unwrap_or_default()
     }
 }
 
