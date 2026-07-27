@@ -63,14 +63,6 @@ mod storage;
 mod ttl;
 mod types;
 
-mod authorization;
-mod contracts;
-mod create_contract;
-mod dispute;
-mod milestones;
-mod reputation_migration;
-mod settlement;
-
 pub use constants::*;
 mod utils;
 
@@ -95,9 +87,18 @@ pub use dispute::resolution_payouts;
 pub use migration::PendingClientMigration;
 pub use storage::{initialize_storage_version, ESCROW_STORAGE_VERSION};
 pub use ttl::{ADMIN_ROTATION_MIN_DELAY_LEDGERS, PENDING_MIGRATION_TTL_LEDGERS};
+// Canonical milestone-vector storage helpers (issue #701). Every module in
+// the contract must route milestone reads/writes through these (defined in
+// `ttl`) rather than constructing the composite `(DataKey::Contract(id),
+// Symbol("milestones"))` key inline. Centralising access gives a single
+// point of truth for the key shape, the missing-entry error path, and
+// the persistent-TTL bump parameters used by every read and write.
 pub use ttl::{
     load_milestones, milestone_storage_key, store_milestones, try_load_milestones,
 };
+// Keep shared storage keys and escrow domain types centralized in `types.rs`.
+// `DisputeResolution` and `DisputeSplit` are defined once in `types.rs` and
+// re-exported here; `dispute.rs` uses them via `crate::DisputeResolution`.
 pub use milestones::{Milestone, MilestoneApprovals, MilestoneSummary, ReleaseAuthorization};
 pub use types::{
     BatchSettlementResult, Contract, ContractBounds, ContractStatus, ContractSummary, DataKey,
@@ -109,7 +110,164 @@ pub use types::{
 
 type Error = EscrowError;
 
+// Maximum bounds constants - re-export from amount_validation for API visibility
+pub const MAX_MILESTONES: u32 = 10;
+pub const MAX_SINGLE_AMOUNT_STROOPS: i128 = crate::amount_validation::MAX_SINGLE_AMOUNT_STROOPS;
+pub const MAX_TOTAL_ESCROW_STROOPS: i128 = MAX_SINGLE_AMOUNT_STROOPS;
+
+/// Default settlement limit (max single milestone amount in stroops).
+/// Preserves the original hard-coded behaviour; admin may lower it via
+/// [`Escrow::set_settlement_limit`] but never above this absolute ceiling.
+pub const DEFAULT_SETTLEMENT_LIMIT: i128 = MAX_SINGLE_AMOUNT_STROOPS;
+
+/// Maximum number of items accepted by [`Escrow::finalize_contracts_batch`].
+///
+/// Chosen to match the existing batch-create cap (10) so a single Soroban
+/// invocation cannot exhaust the per-transaction compute budget.  Requests
+/// larger than this are rejected with [`EscrowError::BatchSettlementTooLarge`]
+/// before any storage is touched.
+pub const MAX_BATCH_SETTLEMENT: u32 = 10;
+
+#[contract]
+pub struct Escrow;
+
+mod create_contract;
+mod dispute;
+mod governance;
+
+/// Governance-level errors for admin-gated operations.
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum EscrowError {
+    InvalidParticipant = 1,
+    EmptyMilestones = 2,
+    InvalidMilestoneAmount = 3,
+    InvalidDepositAmount = 4,
+    InvalidMilestone = 5,
+    ContractNotFound = 6,
+    EmptyRefundRequest = 7,
+    DuplicateMilestoneInRefund = 8,
+    AlreadyReleased = 9,
+    AlreadyRefunded = 10,
+    InsufficientFunds = 11,
+    AlreadyInitialized = 12,
+    InsufficientAccumulatedFees = 13,
+    /// Returned by lifecycle entrypoints when `initialize` has not been called.
+    ///
+    /// All money-flow operations require initialization so the admin-controlled
+    /// safety rails (pause, emergency controls, protocol fees) are always in
+    /// scope before any funds can move.
+    NotInitialized = 14,
+    UnauthorizedRole = 15,
+    ContractPaused = 16,
+    EmergencyActive = 17,
+    InvalidState = 18,
+    InvalidRating = 19,
+    SelfRating = 20,
+    ReputationAlreadyIssued = 21,
+    NotCompleted = 22,
+    FreelancerMismatch = 23,
+    InvalidStatusTransition = 24,
+    ArbiterRequired = 25,
+    InvalidDisputeSplit = 26,
+    AccountingInvariantViolated = 27,
+    PotentialOverflow = 28,
+    AlreadyFinalized = 29,
+    AmountMustBePositive = 30,
+    /// No settlement token has been bound for custody transfers.
+    SettlementTokenNotConfigured = 31,
+    /// A settlement token has already been bound.
+    SettlementTokenAlreadyBound = 32,
+    /// The sum of milestone amounts exceeded the configured maximum or overflowed.
+    TotalCapExceeded = 33,
+    /// Too many milestones were provided.
+    TooManyMilestones = 34,
+    /// An arbiter was required by the release authorization mode but not provided.
+    MissingArbiter = 35,
+    /// The provided arbiter is invalid (same as client or freelancer).
+    InvalidArbiter = 36,
+    /// Contract is cancelled and must not accept further value-moving operations.
+    ContractCancelled = 37,
+    /// Contract has been refunded and is terminal for value-moving operations.
+    ContractRefunded = 38,
+    /// The address supplied as settlement token is not a valid token contract.
+    /// The pre-bind probe called `token::Client::balance` against the escrow
+    /// contract address and the call panicked — the address does not implement
+    /// the SAC token interface.
+    InvalidSettlementToken = 39,
+    /// The address supplied as settlement token is the escrow contract itself.
+    /// Binding self would create a circular custody reference and brick all
+    /// transfer paths.
+    SettlementTokenIsSelf = 40,
+    /// The address supplied as settlement token is the escrow admin.
+    /// Binding the admin as the custody asset conflates governance authority
+    /// with the settlement token role.
+    SettlementTokenIsAdmin = 41,
+    /// Reputation feedback comment was empty.
+    EmptyComment = 42,
+    /// Reputation feedback comment exceeded the 200-character maximum.
+    CommentTooLong = 43,
+    /// Milestone rollback is not allowed in the current state.
+    RollbackNotAllowed = 44,
+}
+
 impl Escrow {
+    pub(crate) fn validate_contract_id_bounds(env: &Env, contract_id: u32) {
+        if contract_id == 0 {
+            env.panic_with_error(Error::InvalidContractId);
+        }
+    }
+
+    /// Get the settlement token address from the canonical `DataKey` binding.
+    pub(crate) fn read_settlement_token(env: &Env) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::SettlementToken)
+    }
+
+    pub(crate) fn write_settlement_token(env: &Env, token: &Address) {
+        settlement::write_settlement_token(env, token);
+    }
+
+    pub(crate) fn require_initialized(env: &Env) {
+        if !env
+            .storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::Initialized)
+            .unwrap_or(false)
+        {
+            env.panic_with_error(Error::NotInitialized);
+        }
+    }
+
+    pub(crate) fn is_initialized(env: &Env) -> bool {
+        env.storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::Initialized)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn require_not_paused(env: &Env) {
+        if env.storage().persistent().get::<_, bool>(&DataKey::Paused).unwrap_or(false) {
+            env.panic_with_error(EscrowError::ContractPaused);
+        }
+        if env.storage().persistent().get::<_, bool>(&DataKey::Emergency).unwrap_or(false) {
+            env.panic_with_error(EscrowError::EmergencyActive);
+        }
+    }
+
+    pub(crate) fn require_not_finalized(env: &Env, contract_id: u32) {
+        if env.storage().persistent().has(&DataKey::Finalization(contract_id)) {
+            env.panic_with_error(EscrowError::AlreadyFinalized);
+        }
+    }
+
+    pub(crate) fn validate_contract_id_bounds(env: &Env, contract_id: u32) {
+        if contract_id == 0 {
+            env.panic_with_error(EscrowError::InvalidContractId);
+        }
+    }
+
+    /// Validate that a contract ID is within acceptable bounds.
     pub(crate) fn validate_contract_id_bounds(env: &Env, contract_id: u32) {
         if contract_id == 0 {
             env.panic_with_error(Error::InvalidContractId);
