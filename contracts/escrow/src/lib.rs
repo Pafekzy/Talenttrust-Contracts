@@ -17,6 +17,7 @@
 //! | `deposit` | Deposit preflight and post-transfer accounting used by `deposit_funds`. | `DataKey::Contract(contract_id)` and `(DataKey::Contract(contract_id), "milestones")`. |
 //! | `finalize` | Immutable finalization records, finalization guards, and final contract summaries. | `DataKey::Finalization(contract_id)`; reads `Contract(id)`, `(Contract(id), "milestones")`, `Paused`, and `Emergency`. |
 //! | `migration` | Client migration proposals, acceptance checks, cancellation, and pending-migration reads. | Temporary `DataKey::PendingClientMigration(contract_id)`; reads and updates `DataKey::Contract(contract_id)`. |
+//! | `rollback` | Guarded rollback of unchanged, unresolved disputes. | `DataKey::DisputeRollback(contract_id)`; reads and updates `DataKey::Contract(contract_id)` and its milestones. |
 //! | `ttl` | TTL constants plus helpers for temporary and persistent storage renewal. | Extends caller-provided keys, especially `Contract(id)`, `(Contract(id), "milestones")`, `NextContractId`, participant indexes, approvals, and migrations. |
 //! | `types` | Shared Soroban types, error enums, summaries, governance records, dispute records, and the canonical `DataKey` enum. | Declares storage key schema only; does not access storage itself. |
 //! | `utils` | Small deterministic helpers shared by entrypoints, currently ledger timestamp access. | None. |
@@ -57,6 +58,7 @@ mod deposit;
 mod finalize;
 mod migration;
 pub mod milestones_consts;
+mod rollback;
 mod ttl;
 mod types;
 mod utils;
@@ -435,6 +437,42 @@ impl Escrow {
         }
     }
 
+    /// Returns the current arbiter refund split configuration.
+    pub fn get_arbiter_config(env: Env) -> DisputeConfig {
+        dispute::get_dispute_config(&env).unwrap_or_default()
+    }
+
+    /// Set the arbiter refund split configuration in basis points.
+    pub fn set_arbiter_config(env: Env, freelancer_bps: u32, client_bps: u32) -> bool {
+        Self::require_initialized(&env);
+
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| env.panic_with_error(EscrowError::NotInitialized));
+        admin.require_auth();
+
+        if freelancer_bps > 10_000 || client_bps > 10_000 || freelancer_bps + client_bps != 10_000
+        {
+            env.panic_with_error(Error::InvalidProtocolParameters);
+        }
+
+        let old_config = dispute::get_dispute_config(&env).unwrap_or_default();
+        let new_config = DisputeConfig {
+            partial_refund_freelancer_bps: freelancer_bps,
+            partial_refund_client_bps: client_bps,
+        };
+
+        dispute::set_dispute_config(&env, new_config.clone());
+
+        env.events().publish(
+            (Symbol::new(&env, "arbiter_cfg"),),
+            (old_config, new_config, admin, env.ledger().timestamp()),
+        );
+        true
+    }
+
     /// Returns the current mainnet readiness checklist.
     ///
     /// The checklist tracks critical configuration steps that must be completed
@@ -534,6 +572,11 @@ impl Escrow {
     /// - `InvalidStatusTransition` unless status is `Completed` or `Disputed`.
     pub fn finalize_contract(env: Env, contract_id: u32, finalizer: Address) -> bool {
         finalize::finalize_contract_impl(&env, contract_id, finalizer)
+    }
+
+    /// Restore an unchanged, unresolved dispute to its pre-dispute status.
+    pub fn rollback_dispute(env: Env, contract_id: u32) -> bool {
+        rollback::rollback_dispute_impl(&env, contract_id)
     }
 
     /// Return immutable close metadata for `contract_id`, if it has been finalized.
@@ -1044,6 +1087,7 @@ impl Escrow {
             .persistent()
             .get(&DataKey::Contract(contract_id))
             .unwrap_or_else(|| env.panic_with_error(EscrowError::ContractNotFound));
+        let was_disputed = contract.status == ContractStatus::Disputed;
 
         // Extend TTL on contract read
         ttl::extend_contract_ttl(&env, contract_id);
@@ -1146,6 +1190,10 @@ impl Escrow {
         env.storage()
             .persistent()
             .set(&DataKey::Contract(contract_id), &contract);
+
+        if was_disputed {
+            rollback::clear_dispute_rollback(&env, contract_id);
+        }
 
         // Extend TTL on contract write (milestone TTL already extended by store_milestones)
         ttl::extend_contract_ttl(&env, contract_id);
@@ -2217,6 +2265,9 @@ impl Escrow {
             _ => env.panic_with_error(Error::InvalidState),
         }
 
+        let milestones = ttl::load_milestones(&env, contract_id);
+        rollback::store_dispute_rollback(&env, contract_id, &contract, &milestones);
+
         contract.status = ContractStatus::Disputed;
         env.storage()
             .persistent()
@@ -2314,6 +2365,7 @@ impl Escrow {
         env.storage()
             .persistent()
             .set(&DataKey::Contract(contract_id), &contract);
+        rollback::clear_dispute_rollback(&env, contract_id);
 
         ttl::extend_contract_ttl(&env, contract_id);
 
@@ -2323,6 +2375,14 @@ impl Escrow {
         );
 
         true
+    }
+
+    /// Returns the current arbiter dispute-split configuration.
+    ///
+    /// If no configuration has been stored yet, returns the protocol default:
+    /// `partial_refund_freelancer_bps = 3000`, `partial_refund_client_bps = 7000`.
+    pub fn get_arbiter_config(env: Env) -> DisputeConfig {
+        dispute::get_dispute_config(&env).unwrap_or_default()
     }
 }
 

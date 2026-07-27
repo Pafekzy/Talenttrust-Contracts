@@ -13,9 +13,16 @@ use crate::{
     Escrow, EscrowArgs, EscrowClient,
 };
 
-// ---------------------------------------------------------------------------
-// resolution_payouts: pure arithmetic for dispute payout calculations
-// ---------------------------------------------------------------------------
+/// Typed result of computing a dispute resolution's payouts, replacing the
+/// previous untyped `(i128, i128)` tuple return.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputePayouts {
+    /// Amount refunded back to the client.
+    pub client_payout: i128,
+    /// Amount released to the freelancer.
+    pub freelancer_payout: i128,
+}
 
 /// Compute the payout split for a dispute resolution.
 ///
@@ -41,7 +48,10 @@ pub fn resolution_payouts(
     }
 
     match resolution {
-        DisputeResolution::FullRefund => Ok((available, 0)),
+        DisputeResolution::FullRefund => Ok(DisputePayouts {
+            client_payout: available,
+            freelancer_payout: 0,
+        }),
         DisputeResolution::PartialRefund => {
             // freelancer gets floor(available * 30 / 100), client gets remainder
             let freelancer_payout = available

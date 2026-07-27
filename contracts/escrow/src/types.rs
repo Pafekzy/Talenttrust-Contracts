@@ -90,6 +90,7 @@ pub enum DataKey {
     Finalization(u32),
     // Settlement token
     SettlementToken,
+    DisputeRollback(u32),
 }
 
 /// Canonical contract error type for all entrypoint-facing errors.
@@ -193,6 +194,10 @@ pub enum Error {
     SettlementTokenNotConfigured = 52,
     /// The milestone deadline has not yet passed.
     MilestoneNotOverdue = 53,
+    /// No safe rollback is available for the contract's current state.
+    RollbackNotAllowed = 54,
+    /// Contract or milestone state changed after the rollback point was recorded.
+    RollbackStateChanged = 55,
 }
 
 /// Contract lifecycle states
