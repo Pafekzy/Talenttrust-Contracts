@@ -33,115 +33,64 @@ pub fn set_dispute_config(env: &Env, config: DisputeConfig) -> bool {
     true
 }
 
-// ---------------------------------------------------------------------------
-// resolution_payouts: pure arithmetic for dispute payout calculations
-// ---------------------------------------------------------------------------
+/// Typed result of computing a dispute resolution's payouts, replacing the
+/// previous untyped `(i128, i128)` tuple return.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputePayouts {
+    /// Amount refunded back to the client.
+    pub client_payout: i128,
+    /// Amount released to the freelancer.
+    pub freelancer_payout: i128,
+}
 
-/// Compute the payout split for a dispute resolution.
-///
-/// Returns `(client_payout, freelancer_payout)` where both values are non-negative
-/// and sum to the available balance. The available balance is computed as:
-/// `available = funded_amount - released_amount - refunded_amount`.
-///
-/// # Errors
-/// - `AccountingInvariantViolated` if available would be negative (corrupted state)
-/// - `PotentialOverflow` if intermediate calculations overflow
-/// - `InvalidDisputeSplit` for Split variant with negative legs, components
-///   that individually exceed `available`, or whose non-overflowing sum does
-///   not exactly match `available`
-///
-/// # Example
-/// ```ignore
-/// use soroban_sdk::{Address, Env};
-/// use crate::{
-///     Contract, ContractStatus, DisputeResolution, DisputeSplit, ReleaseAuthorization,
-/// };
-///
-/// let env = Env::default();
-/// let contract = Contract {
-///     client: Address::generate(&env),
-///     freelancer: Address::generate(&env),
-///     arbiter: Some(Address::generate(&env)),
-///     status: ContractStatus::Disputed,
-///     total_deposited: 100,
-///     funded_amount: 100,
-///     released_amount: 0,
-///     refunded_amount: 0,
-///     release_authorization: ReleaseAuthorization::ClientOnly,
-///     reputation_issued: false,
-/// };
-///
-/// // FullRefund routes every available stroop to the client.
-/// assert_eq!(
-///     resolution_payouts(&contract, &DisputeResolution::FullRefund),
-///     Ok((100, 0))
-/// );
-///
-/// // PartialRefund applies the 70/30 split, with floor rounding on the
-/// // freelancer leg (client receives the whole remainder).
-/// assert_eq!(
-///     resolution_payouts(&contract, &DisputeResolution::PartialRefund),
-///     Ok((70, 30))
-/// );
-///
-/// // FullPayout routes every available stroop to the freelancer.
-/// assert_eq!(
-///     resolution_payouts(&contract, &DisputeResolution::FullPayout),
-///     Ok((0, 100))
-/// );
-///
-/// // Split accepts custom amounts that exactly conserve the available balance.
-/// let split = DisputeSplit {
-///     client_amount: 65,
-///     freelancer_amount: 35,
-/// };
-/// assert_eq!(
-///     resolution_payouts(&contract, &DisputeResolution::Split(split)),
-///     Ok((65, 35))
-/// );
-/// ```
+#[allow(dead_code)]
 pub fn resolution_payouts(
     contract: &Contract,
     resolution: &DisputeResolution,
-) -> Result<(i128, i128), EscrowError> {
-    let available = amount_validation::checked_available_balance(
-        contract.funded_amount,
-        contract.released_amount,
-        contract.refunded_amount,
-    )?;
+) -> Result<DisputePayouts, Error> {
+    let available = contract
+        .funded_amount
+        .checked_sub(contract.released_amount)
+        .and_then(|value| value.checked_sub(contract.refunded_amount))
+        .ok_or(Error::AccountingInvariantViolated)?;
+    if available < 0 {
+        return Err(Error::AccountingInvariantViolated);
+    }
 
     match resolution {
-        DisputeResolution::FullRefund => Ok((available, 0)),
+        DisputeResolution::FullRefund => Ok(DisputePayouts {
+            client_payout: available,
+            freelancer_payout: 0,
+        }),
         DisputeResolution::PartialRefund => {
             // freelancer gets floor(available * PARTIAL_REFUND_FREELANCER_SHARE / PARTIAL_REFUND_DENOMINATOR), client gets remainder
             let freelancer_payout = available
                 .checked_mul(PARTIAL_REFUND_FREELANCER_SHARE)
                 .and_then(|value| value.checked_div(PARTIAL_REFUND_DENOMINATOR))
                 .ok_or(Error::PotentialOverflow)?;
-            let client_payout = available
-                .checked_sub(freelancer_payout)
-                .ok_or(Error::PotentialOverflow)?;
-            Ok((client_payout, freelancer_payout))
+            Ok(DisputePayouts {
+                client_payout: available - freelancer_payout,
+                freelancer_payout,
+            })
         }
-        DisputeResolution::FullPayout => Ok((0, available)),
-        DisputeResolution::Split(split) => {
-            if split.client_amount < 0 || split.freelancer_amount < 0 {
-                return Err(EscrowError::InvalidDisputeSplit);
+        DisputeResolution::FullPayout => Ok(DisputePayouts {
+            client_payout: 0,
+            freelancer_payout: available,
+        }),
+        DisputeResolution::Split(client_amount, freelancer_amount) => {
+            if *client_amount < 0 || *freelancer_amount < 0 {
+                return Err(Error::InvalidDisputeSplit);
             }
             if split.client_amount > MAX_SINGLE_AMOUNT_STROOPS
                 || split.freelancer_amount > MAX_SINGLE_AMOUNT_STROOPS
             {
                 return Err(EscrowError::InvalidDisputeSplit);
             }
-            if split.client_amount > available || split.freelancer_amount > available {
-                return Err(EscrowError::InvalidDisputeSplit);
-            }
-            let total = safe_add_amounts(split.client_amount, split.freelancer_amount)
-                .ok_or(EscrowError::PotentialOverflow)?;
-            if total > available || total != available {
-                return Err(EscrowError::InvalidDisputeSplit);
-            }
-            Ok((split.client_amount, split.freelancer_amount))
+            Ok(DisputePayouts {
+                client_payout: *client_amount,
+                freelancer_payout: *freelancer_amount,
+            })
         }
     }
 }
@@ -212,13 +161,67 @@ pub fn get_dispute_storage_version(env: &Env, contract_id: u32) -> u32 {
         .unwrap_or(0)
 }
 
-/// Upgrade a legacy v0 dispute record into the current v1 layout.
-pub fn migrate_dispute_metadata_v0_to_v1(v0: DisputeMetadataV0) -> DisputeMetadata {
-    DisputeMetadata {
-        schema_version: DISPUTE_STORAGE_VERSION,
-        raised_by: v0.raised_by,
-        reason_hash: v0.reason_hash,
-        raised_at: v0.raised_at,
+        env.events().publish(
+            (symbol_short!("dispute"), contract_id),
+            (caller, env.ledger().timestamp()),
+        );
+        true
+    }
+
+    /// Resolve a disputed escrow. Only the assigned arbiter may call this.
+    pub fn resolve_dispute(
+        env: Env,
+        contract_id: u32,
+        arbiter: Address,
+        resolution: DisputeResolution,
+    ) -> bool {
+        Self::require_not_paused(&env);
+        arbiter.require_auth();
+
+        let key = DataKey::Contract(contract_id);
+        let mut contract = env
+            .storage()
+            .persistent()
+            .get::<_, Contract>(&key)
+            .unwrap_or_else(|| env.panic_with_error(Error::ContractNotFound));
+
+        if contract.status != ContractStatus::Disputed {
+            env.panic_with_error(Error::InvalidState);
+        }
+        if contract.arbiter.clone() != Some(arbiter.clone()) {
+            env.panic_with_error(Error::UnauthorizedRole);
+        }
+
+        let payouts = resolution_payouts(&contract, &resolution)
+            .unwrap_or_else(|err| env.panic_with_error(err));
+        let client_payout = payouts.client_payout;
+        let freelancer_payout = payouts.freelancer_payout;
+
+        contract.refunded_amount = safe_add_amounts(contract.refunded_amount, client_payout)
+            .unwrap_or_else(|| env.panic_with_error(Error::PotentialOverflow));
+        contract.released_amount = safe_add_amounts(contract.released_amount, freelancer_payout)
+            .unwrap_or_else(|| env.panic_with_error(Error::PotentialOverflow));
+
+        if safe_add_amounts(contract.released_amount, contract.refunded_amount)
+            != Some(contract.funded_amount)
+        {
+            env.panic_with_error(Error::AccountingInvariantViolated);
+        }
+
+        contract.status = final_status_after_resolution(&contract);
+        env.storage().persistent().set(&key, &contract);
+
+        env.events().publish(
+            (symbol_short!("dsp_res"), contract_id),
+            (
+                arbiter,
+                resolution.code(),
+                client_payout,
+                freelancer_payout,
+                env.ledger().timestamp(),
+            ),
+        );
+        true
     }
 }
 
