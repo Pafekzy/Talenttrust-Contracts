@@ -54,15 +54,15 @@ fn release_event_has_expected_topic_and_payload() {
 
     let event = latest_event(&fixture);
     assert_topic(&fixture, &event, symbol_short!("mlstn_rls"));
-    let payload: (u32, i128, i128, i128, i128, Address, u64) =
+    let payload: (u32, i128, i128, i128, Address, u64) =
         TryFromVal::try_from_val(&fixture.env, &event.2).unwrap();
     assert_eq!(
         payload,
         (
             milestone_index,
-            4_0000000_i128,
+            400_0000000_i128,
             0_i128,
-            4_0000000_i128,
+            400_0000000_i128,
             fixture.client.clone(),
             timestamp,
         )
@@ -82,7 +82,10 @@ fn refund_event_has_expected_topic_and_payload() {
     assert_topic(&fixture, &event, symbol_short!("refunded"));
     let payload: (i128, ContractStatus, u64) =
         TryFromVal::try_from_val(&fixture.env, &event.2).unwrap();
-    assert_eq!(payload, (8_0000000_i128, ContractStatus::Funded, timestamp));
+    assert_eq!(
+        payload,
+        (800_0000000_i128, ContractStatus::Funded, timestamp)
+    );
 }
 
 #[test]
