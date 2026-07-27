@@ -22,6 +22,7 @@ mod contracts;
 mod create_contract_bounds;
 mod deposit;
 mod dispute;
+mod events_page;
 mod dispute_storage;
 mod emergency_controls;
 mod indexed_event;

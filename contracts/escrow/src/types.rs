@@ -67,6 +67,23 @@ pub struct ArbiterEntry {
     pub arbiter: Address,
 }
 
+/// Lightweight event entry returned by the paginated events view.
+///
+/// Each entry captures a point-in-time snapshot of a contract's state that was
+/// recorded when [`crate::events::emit_contract_indexed_event`] was called.
+/// Entries are stored sequentially so callers can enumerate them with
+/// start/limit pagination.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EventEntry {
+    pub contract_id: u32,
+    pub status: u32,
+    pub funded_amount: i128,
+    pub released_amount: i128,
+    pub refunded_amount: i128,
+    pub total_deposited: i128,
+}
+
 /// A point-in-time snapshot of the contract state.
 /// This structure is used for both indexing (`get_contract_summary`) and
 /// the immutable close metadata stored at finalization.
@@ -246,6 +263,9 @@ pub enum DataKey {
     // Disputes: versioned metadata + per-contract layout marker
     Dispute(u32),
     DisputeStorageVersion(u32),
+    // Event log: sequential event records for paginated enumeration
+    NextEventId,
+    Event(u32),
 }
 
 /// Canonical contract error type for all entrypoint-facing errors.
