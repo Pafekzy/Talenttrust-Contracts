@@ -1205,3 +1205,91 @@ fn resolve_dispute_accounting_overflow_protection_released() {
         Error::PotentialOverflow,
     );
 }
+
+/// Raising a dispute emits a `("dispute", "opened")` event.
+#[test]
+fn raise_dispute_emits_opened_event() {
+    let env = make_env();
+    let escrow_addr = env.register(Escrow, ());
+    let client = EscrowClient::new(&env, &escrow_addr);
+    client.initialize(&Address::generate(&env));
+    let client_addr = Address::generate(&env);
+    let freelancer_addr = Address::generate(&env);
+    let arbiter_addr = Address::generate(&env);
+    
+    let milestones = soroban_sdk::vec![&env, 100_i128];
+    let contract_id = client.create_contract(
+        &client_addr,
+        &freelancer_addr,
+        &Some(arbiter_addr),
+        &milestones,
+        &ReleaseAuthorization::ClientOnly,
+    );
+    deposit(&env, &client, &contract_id, &client_addr, &100_i128);
+
+    let event_count_before = env.events().all().len();
+    assert!(client.raise_dispute(&contract_id, &client_addr));
+
+    let events = env.events().all();
+    assert_eq!(events.len(), event_count_before + 1);
+    let event = events.get(events.len() - 1).unwrap();
+
+    assert_eq!(
+        soroban_sdk::Symbol::try_from_val(&env, &event.1.get(0).unwrap()).unwrap(),
+        soroban_sdk::symbol_short!("dispute")
+    );
+    assert_eq!(
+        soroban_sdk::Symbol::try_from_val(&env, &event.1.get(1).unwrap()).unwrap(),
+        soroban_sdk::symbol_short!("opened")
+    );
+    assert_eq!(
+        <(u32, Address)>::try_from_val(&env, &event.2).unwrap(),
+        (contract_id, client_addr)
+    );
+}
+
+/// Resolving a dispute emits a `("dispute", "resolved")` event.
+#[test]
+fn resolve_dispute_emits_resolved_event() {
+    let env = make_env();
+    let escrow_addr = env.register(Escrow, ());
+    let client = EscrowClient::new(&env, &escrow_addr);
+    client.initialize(&Address::generate(&env));
+    let client_addr = Address::generate(&env);
+    let freelancer_addr = Address::generate(&env);
+    let arbiter_addr = Address::generate(&env);
+    
+    let milestones = soroban_sdk::vec![&env, 100_i128];
+    let contract_id = client.create_contract(
+        &client_addr,
+        &freelancer_addr,
+        &Some(arbiter_addr.clone()),
+        &milestones,
+        &ReleaseAuthorization::ClientOnly,
+    );
+    deposit(&env, &client, &contract_id, &client_addr, &100_i128);
+    client.raise_dispute(&contract_id, &client_addr);
+
+    let event_count_before = env.events().all().len();
+    let resolution = DisputeResolution::FullRefund;
+    assert!(client.resolve_dispute(&contract_id, &arbiter_addr, &resolution));
+
+    let events = env.events().all();
+    // Resolving a dispute emits two events: the arbiter event and the dispute resolved event.
+    // The dispute resolved event is emitted last in `resolve_dispute_impl`.
+    assert_eq!(events.len(), event_count_before + 2);
+    let event = events.get(events.len() - 1).unwrap();
+
+    assert_eq!(
+        soroban_sdk::Symbol::try_from_val(&env, &event.1.get(0).unwrap()).unwrap(),
+        soroban_sdk::symbol_short!("dispute")
+    );
+    assert_eq!(
+        soroban_sdk::Symbol::try_from_val(&env, &event.1.get(1).unwrap()).unwrap(),
+        soroban_sdk::symbol_short!("resolved")
+    );
+    assert_eq!(
+        <(u32, u32)>::try_from_val(&env, &event.2).unwrap(),
+        (contract_id, resolution.code())
+    );
+}
