@@ -32,8 +32,8 @@
 //! - **Funded â†’ Funded**: Partial refund (some milestones remain unreleased/unrefunded)
 //! - **Funded â†’ Completed**: All milestones either released or refunded (mixed state)
 
-use crate::{Contract, ContractStatus, DataKey, EscrowError, Milestone};
-use soroban_sdk::{symbol_short, Env, Symbol, Vec};
+use crate::{events, Contract, ContractStatus, DataKey, EscrowError, Milestone};
+use soroban_sdk::{Env, Vec};
 
 /// Refunds unreleased milestones back to the client.
 ///
@@ -122,9 +122,13 @@ pub fn refund_unreleased_milestones(
     for idx in milestone_indices.iter() {
         let m = milestones.get(idx).unwrap();
         // Indexed event for off-chain milestone-history reconstruction.
-        env.events().publish(
-            (symbol_short!("mlstn_idx"), contract_id, idx),
-            (m.amount, m.released, m.refunded, env.ledger().timestamp()),
+        events::emit_milestone_index_event(
+            env,
+            contract_id,
+            idx,
+            m.amount,
+            m.released,
+            m.refunded,
         );
     }
 

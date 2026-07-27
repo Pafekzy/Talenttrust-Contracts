@@ -103,7 +103,7 @@ pub use milestones::{Milestone, MilestoneApprovals, MilestoneSummary, ReleaseAut
 pub use types::{
     BatchSettlementResult, Contract, ContractBounds, ContractStatus, ContractSummary, DataKey,
     DepositMode, DisputeMetadata, DisputeMetadataV0, DisputeResolution, DisputeSplit, Error,
-    EventEntry, GovernedParameters, Milestone, MilestoneApprovals, MilestoneSummary,
+    GovernedParameters, Milestone, MilestoneApprovals, MilestoneIndexEvent, MilestoneSummary,
     PendingAdminProposal, ReadinessChecklist, ReleaseAuthorization, Reputation, SettlementItem,
     SplitAmounts, CONTRACT_SUMMARY_SCHEMA_VERSION, DISPUTE_STORAGE_VERSION,
 };
@@ -1651,9 +1651,13 @@ impl Escrow {
         milestone.protocol_fee = protocol_fee;
         milestones.set(milestone_index, milestone.clone());
         // Indexed event for off-chain milestone-history reconstruction.
-        env.events().publish(
-            (symbol_short!("mlstn_idx"), contract_id, milestone_index),
-            (milestone.amount, true, false, env.ledger().timestamp()),
+        events::emit_milestone_index_event(
+            &env,
+            contract_id,
+            milestone_index,
+            milestone.amount,
+            true,
+            false,
         );
         // released_amount tracks net amounts paid out to freelancers.
         // accumulated_fees tracks protocol fees retained in the contract.
@@ -2076,9 +2080,13 @@ impl Escrow {
             let mlstn_idx_amount = milestone.amount;
             milestones.set(idx, milestone);
             // Indexed event for off-chain milestone-history reconstruction.
-            env.events().publish(
-                (symbol_short!("mlstn_idx"), contract_id, idx),
-                (mlstn_idx_amount, false, true, env.ledger().timestamp()),
+            events::emit_milestone_index_event(
+                &env,
+                contract_id,
+                idx,
+                mlstn_idx_amount,
+                false,
+                true,
             );
         }
 

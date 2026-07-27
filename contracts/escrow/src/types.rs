@@ -42,6 +42,30 @@ pub struct MilestoneEntry {
     pub amount: i128,
 }
 
+/// Typed payload for the `mlstn_idx` indexed event emitted on every milestone
+/// state change (creation, release, refund).
+///
+/// Replaces the previous opaque `(amount, released, refunded, timestamp)` tuple
+/// to make the on-ledger event self-describing and easier to decode off-chain.
+///
+/// # Event specification
+/// - **Topic 0**: `symbol_short!("mlstn_idx")`
+/// - **Topic 1**: `contract_id: u32`
+/// - **Topic 2**: `milestone_index: u32`
+/// - **Payload**: `MilestoneIndexEvent`
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MilestoneIndexEvent {
+    /// The milestone amount in stroops.
+    pub amount: i128,
+    /// Whether the milestone has been released to the freelancer.
+    pub released: bool,
+    /// Whether the milestone has been refunded to the client.
+    pub refunded: bool,
+    /// Unix timestamp (seconds) of the ledger when this event was emitted.
+    pub timestamp: u64,
+}
+
 /// Lightweight contract entry returned by the paginated contracts view.
 ///
 /// Carries only the fields needed for a UI listing: the contract `id`, a
