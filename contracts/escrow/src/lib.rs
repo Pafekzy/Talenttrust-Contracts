@@ -56,6 +56,7 @@ mod approvals;
 mod deposit;
 mod finalize;
 mod migration;
+pub mod milestones_consts;
 mod ttl;
 mod types;
 mod utils;
@@ -87,7 +88,10 @@ pub use types::{
 };
 
 // Maximum bounds constants - re-export from amount_validation for API visibility
-pub const MAX_MILESTONES: u32 = 10;
+pub use milestones_consts::{
+    MAX_COMMENT_BYTES, MAX_FEE_BPS, MAX_MILESTONES, MAX_RATING, MIN_COMMENT_BYTES, MIN_FEE_BPS,
+    MIN_RATING, PROTOCOL_FEE_BPS_DENOMINATOR,
+};
 pub const MAX_SINGLE_AMOUNT_STROOPS: i128 = crate::amount_validation::MAX_SINGLE_AMOUNT_STROOPS;
 pub const MAX_TOTAL_ESCROW_STROOPS: i128 = MAX_SINGLE_AMOUNT_STROOPS;
 
@@ -427,7 +431,7 @@ impl Escrow {
             max_milestones: MAX_MILESTONES,
             max_single_milestone_stroops: MAX_SINGLE_AMOUNT_STROOPS,
             max_total_escrow_stroops: MAX_TOTAL_ESCROW_STROOPS,
-            max_fee_bps: 10_000,
+            max_fee_bps: MAX_FEE_BPS,
         }
     }
 
@@ -1697,7 +1701,7 @@ impl Escrow {
             env.panic_with_error(Error::UnauthorizedRole);
         }
 
-        if rating < 1 || rating > 5 {
+        if rating < MIN_RATING || rating > MAX_RATING {
             env.panic_with_error(Error::InvalidRating);
         }
 
@@ -1705,7 +1709,7 @@ impl Escrow {
             env.panic_with_error(Error::EmptyComment);
         }
 
-        if comment.len() > 200 {
+        if comment.len() > MAX_COMMENT_BYTES {
             env.panic_with_error(Error::CommentTooLong);
         }
 
@@ -2124,7 +2128,7 @@ impl Escrow {
         let product = amount
             .checked_mul(fee_bps as i128)
             .unwrap_or_else(|| env.panic_with_error(Error::PotentialOverflow));
-        product / 10_000
+        product / PROTOCOL_FEE_BPS_DENOMINATOR as i128
     }
 
     // ── Internal guards ──────────────────────────────────────────────────────
