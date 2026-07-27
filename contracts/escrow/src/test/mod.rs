@@ -9,6 +9,8 @@ use crate::{
 
 // --- Submodules ---
 mod approval_expiry;
+mod arbiter_config_setter;
+mod arbiter_config_view;
 mod cancel_contract;
 mod client_migration;
 mod create_contract_bounds;
@@ -24,6 +26,7 @@ mod refund;
 mod release;
 mod release_authorization;
 mod reputation;
+mod reputation_config_setter;
 mod rollback;
 mod security;
 mod ttl_tests;
