@@ -26,6 +26,7 @@ mod refund;
 mod release;
 mod release_authorization;
 mod reputation;
+mod reputation_config_setter;
 mod rollback;
 mod security;
 mod ttl_tests;

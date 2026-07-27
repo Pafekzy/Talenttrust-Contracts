@@ -93,6 +93,8 @@ pub enum DataKey {
     DisputeRollback(u32),
     // Dispute / arbiter configuration
     DisputeConfigKey,
+    // Reputation configuration
+    ReputationConfigKey,
 }
 
 /// Canonical contract error type for all entrypoint-facing errors.
@@ -200,6 +202,8 @@ pub enum Error {
     RollbackNotAllowed = 54,
     /// Contract or milestone state changed after the rollback point was recorded.
     RollbackStateChanged = 55,
+    /// The provided reputation parameters are out of the allowed bounds.
+    InvalidReputationParameters = 56,
 }
 
 /// Contract lifecycle states
@@ -328,6 +332,36 @@ pub struct Reputation {
     pub completed_contracts: i128,
     pub total_rating: i128,
     pub last_rating: i128,
+}
+
+/// Runtime-configurable reputation validation parameters, stored under
+/// [`DataKey::ReputationConfigKey`].
+///
+/// These were compile-time constants (`MIN_RATING`, `MAX_RATING`,
+/// `MAX_COMMENT_BYTES`) until issue #1119 added
+/// `Escrow::set_reputation_config`, which lets the admin retune them within
+/// bounds without redeploying the contract. `issue_reputation` reads this
+/// config (falling back to [`ReputationConfig::default`], which matches the
+/// original constants) instead of the raw constants directly.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReputationConfig {
+    /// Minimum valid rating (inclusive).
+    pub min_rating: u32,
+    /// Maximum valid rating (inclusive).
+    pub max_rating: u32,
+    /// Maximum byte length of a reputation feedback comment (inclusive).
+    pub max_comment_bytes: u32,
+}
+
+impl Default for ReputationConfig {
+    fn default() -> Self {
+        ReputationConfig {
+            min_rating: 1,
+            max_rating: 5,
+            max_comment_bytes: 200,
+        }
+    }
 }
 
 // ── Dispute Resolution ───────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
 //!
 //! | Source | Responsibility | Storage keys owned or touched |
 //! | --- | --- | --- |
-//! | `lib.rs` | Contract wrapper plus root entrypoints for setup, custody, money movement, reads, reputation, work evidence, pause/emergency, fee withdrawal, and dispute orchestration. | `DataKey::Initialized`, `Admin`, `SettlementToken`, `Paused`, `Emergency`, `ReadinessChecklist`, `Contract(id)`, `(Contract(id), "milestones")`, `MilestoneApprovals`, `AccumulatedProtocolFees`, `ReputationIssued`, `PendingReputationCredits`, `Reputation`, `ReputationComment` |
+//! | `lib.rs` | Contract wrapper plus root entrypoints for setup, custody, money movement, reads, reputation, work evidence, pause/emergency, fee withdrawal, and dispute orchestration. | `DataKey::Initialized`, `Admin`, `SettlementToken`, `Paused`, `Emergency`, `ReadinessChecklist`, `Contract(id)`, `(Contract(id), "milestones")`, `MilestoneApprovals`, `AccumulatedProtocolFees`, `ReputationIssued`, `PendingReputationCredits`, `Reputation`, `ReputationComment`, `ReputationConfigKey` |
 //! | `amount_validation` | Stateless validation and checked arithmetic for stroop amounts and milestone totals. | None directly; callers write validated amounts to `Contract(id)` and milestone vectors. |
 //! | `approvals` | Temporary milestone release approvals and release-authorization checks. | Temporary `DataKey::MilestoneApprovals(contract_id, milestone_index)`; reads `Contract(id)` and `(Contract(id), "milestones")`. |
 //! | `deposit` | Deposit preflight and post-transfer accounting used by `deposit_funds`. | `DataKey::Contract(contract_id)` and `(DataKey::Contract(contract_id), "milestones")`. |
@@ -22,7 +22,7 @@
 //! | `types` | Shared Soroban types, error enums, summaries, governance records, dispute records, and the canonical `DataKey` enum. | Declares storage key schema only; does not access storage itself. |
 //! | `utils` | Small deterministic helpers shared by entrypoints, currently ledger timestamp access. | None. |
 //! | `create_contract` | Contract creation, participant/milestone validation, ID allocation, and creation events. | `DataKey::Contract(id)`, `(DataKey::Contract(id), "milestones")`, `NextContractId`, and `GovernedParameters`. |
-//! | `dispute` | Pure dispute payout arithmetic and final-status selection for dispute resolution. | None directly; root dispute entrypoints update `DataKey::Contract(contract_id)`. |
+//! | `dispute` | Dispute payout arithmetic, final-status selection, and arbiter dispute-split config storage. | `DataKey::DisputeConfigKey`; root dispute entrypoints update `DataKey::Contract(contract_id)`. |
 //! | `governance` | Admin-controlled protocol fee, governed parameter, readiness, and admin-rotation entrypoints. | `DataKey::Admin`, `ProtocolFeeBps`, `PendingAdmin`, `GovernedParameters`, and `ReadinessChecklist`. |
 //!
 //! Generate this map with `cargo doc -p escrow --no-deps` and open
@@ -83,10 +83,10 @@ pub use ttl::{ADMIN_ROTATION_MIN_DELAY_LEDGERS, PENDING_MIGRATION_TTL_LEDGERS};
 // `DisputeResolution` and `DisputeSplit` are defined once in `types.rs` and
 // re-exported here; `dispute.rs` uses them via `crate::DisputeResolution`.
 pub use types::{
-    Contract, ContractBounds, ContractStatus, ContractSummary, DataKey, DepositMode,
-    DisputeConfig, DisputeResolution, DisputeSplit, Error, GovernedParameters, Milestone,
-    MilestoneApprovals, MilestoneSummary, PendingAdminProposal, ReadinessChecklist,
-    ReleaseAuthorization, Reputation, SplitAmounts, CONTRACT_SUMMARY_SCHEMA_VERSION,
+    Contract, ContractBounds, ContractStatus, ContractSummary, DataKey, DepositMode, DisputeConfig,
+    DisputeResolution, DisputeSplit, Error, GovernedParameters, Milestone, MilestoneApprovals,
+    MilestoneSummary, PendingAdminProposal, ReadinessChecklist, ReleaseAuthorization, Reputation,
+    ReputationConfig, SplitAmounts, CONTRACT_SUMMARY_SCHEMA_VERSION,
 };
 
 // Maximum bounds constants - re-export from amount_validation for API visibility
@@ -456,8 +456,7 @@ impl Escrow {
             .unwrap_or_else(|| env.panic_with_error(EscrowError::NotInitialized));
         admin.require_auth();
 
-        if freelancer_bps > 10_000 || client_bps > 10_000 || freelancer_bps + client_bps != 10_000
-        {
+        if freelancer_bps > 10_000 || client_bps > 10_000 || freelancer_bps + client_bps != 10_000 {
             env.panic_with_error(Error::InvalidProtocolParameters);
         }
 
@@ -1709,6 +1708,82 @@ impl Escrow {
 
     // ── Reputation ───────────────────────────────────────────────────────────
 
+    /// Returns the current reputation validation parameters (rating bounds and
+    /// comment-length cap).
+    ///
+    /// If no configuration has been stored yet, returns the protocol default:
+    /// `min_rating = 1`, `max_rating = 5`, `max_comment_bytes = 200`.
+    pub fn get_reputation_config(env: Env) -> ReputationConfig {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ReputationConfigKey)
+            .unwrap_or_default()
+    }
+
+    /// Admin-only setter for the reputation validation parameters enforced by
+    /// `issue_reputation`.
+    ///
+    /// # Bounds
+    /// * `min_rating` must be at least `1`.
+    /// * `max_rating` must be greater than or equal to `min_rating` and at
+    ///   most `10`.
+    /// * `max_comment_bytes` must be at least `1` and at most `1_000`.
+    ///
+    /// Any violation is rejected with `InvalidReputationParameters` and the
+    /// stored configuration is left unchanged.
+    ///
+    /// # Errors
+    /// * `NotInitialized` if `initialize` has not been called
+    /// * `UnauthorizedRole` if `admin` is not the stored admin (enforced via
+    ///   `require_auth`, so an unauthorized caller's transaction fails before
+    ///   any state changes)
+    /// * `InvalidReputationParameters` if any bound above is violated
+    ///
+    /// # Events
+    /// On a successful update this publishes a `rep_cfg` event:
+    /// * Topics: `(Symbol "rep_cfg",)`
+    /// * Data: `(old_config: ReputationConfig, new_config: ReputationConfig, admin: Address, timestamp: u64)`
+    pub fn set_reputation_config(
+        env: Env,
+        min_rating: u32,
+        max_rating: u32,
+        max_comment_bytes: u32,
+    ) -> bool {
+        Self::require_initialized(&env);
+
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| env.panic_with_error(EscrowError::NotInitialized));
+        admin.require_auth();
+
+        if min_rating < 1
+            || max_rating < min_rating
+            || max_rating > 10
+            || max_comment_bytes < 1
+            || max_comment_bytes > 1_000
+        {
+            env.panic_with_error(Error::InvalidReputationParameters);
+        }
+
+        let old_config = Self::get_reputation_config(env.clone());
+        let new_config = ReputationConfig {
+            min_rating,
+            max_rating,
+            max_comment_bytes,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReputationConfigKey, &new_config);
+
+        env.events().publish(
+            (Symbol::new(&env, "rep_cfg"),),
+            (old_config, new_config, admin, env.ledger().timestamp()),
+        );
+        true
+    }
+
     /// Issues reputation credit for a completed contract.
     ///
     /// # Comment length
@@ -1722,9 +1797,10 @@ impl Escrow {
     /// * `ContractNotFound` - If contract doesn't exist
     /// * `UnauthorizedRole` - If caller is not the stored client
     /// * `FreelancerMismatch` - If `freelancer` does not match the stored freelancer
-    /// * `InvalidRating` - If rating is not in [1, 5]
+    /// * `InvalidRating` - If rating is outside the configured `[min_rating, max_rating]`
+    ///   range (see `get_reputation_config`/`set_reputation_config`; defaults to [1, 5])
     /// * `EmptyComment` - If comment is 0 bytes
-    /// * `CommentTooLong` - If comment exceeds 200 bytes
+    /// * `CommentTooLong` - If comment exceeds the configured `max_comment_bytes` (default 200)
     /// * `NotCompleted` - If contract status is not `Completed`
     /// * `ReputationAlreadyIssued` - If reputation was already issued
     /// * `SelfRating` - If client and freelancer are the same address
@@ -1732,7 +1808,7 @@ impl Escrow {
     /// # Security
     /// * Pause/emergency gate runs BEFORE contract state read so paused
     ///   contracts cannot have reputation mutated while paused.
-    /// * The 200-byte cap prevents unbounded on-chain storage growth.
+    /// * The comment-byte cap prevents unbounded on-chain storage growth.
     pub fn issue_reputation(
         env: Env,
         contract_id: u32,
@@ -1752,7 +1828,9 @@ impl Escrow {
             env.panic_with_error(Error::UnauthorizedRole);
         }
 
-        if rating < MIN_RATING || rating > MAX_RATING {
+        let reputation_config = Self::get_reputation_config(env.clone());
+
+        if rating < reputation_config.min_rating || rating > reputation_config.max_rating {
             env.panic_with_error(Error::InvalidRating);
         }
 
@@ -1760,7 +1838,7 @@ impl Escrow {
             env.panic_with_error(Error::EmptyComment);
         }
 
-        if comment.len() > MAX_COMMENT_BYTES {
+        if comment.len() > reputation_config.max_comment_bytes {
             env.panic_with_error(Error::CommentTooLong);
         }
 
