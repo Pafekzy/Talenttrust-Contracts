@@ -669,6 +669,41 @@ impl Escrow {
         }
     }
 
+    /// Returns the current arbiter refund split configuration.
+    pub fn get_arbiter_config(env: Env) -> DisputeConfig {
+        dispute::get_dispute_config(&env).unwrap_or_default()
+    }
+
+    /// Set the arbiter refund split configuration in basis points.
+    pub fn set_arbiter_config(env: Env, freelancer_bps: u32, client_bps: u32) -> bool {
+        Self::require_initialized(&env);
+
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| env.panic_with_error(EscrowError::NotInitialized));
+        admin.require_auth();
+
+        if freelancer_bps > 10_000 || client_bps > 10_000 || freelancer_bps + client_bps != 10_000 {
+            env.panic_with_error(Error::InvalidProtocolParameters);
+        }
+
+        let old_config = dispute::get_dispute_config(&env).unwrap_or_default();
+        let new_config = DisputeConfig {
+            partial_refund_freelancer_bps: freelancer_bps,
+            partial_refund_client_bps: client_bps,
+        };
+
+        dispute::set_dispute_config(&env, new_config.clone());
+
+        env.events().publish(
+            (Symbol::new(&env, "arbiter_cfg"),),
+            (old_config, new_config, admin, env.ledger().timestamp()),
+        );
+        true
+    }
+
     /// Returns the current mainnet readiness checklist.
     ///
     /// The checklist tracks critical configuration steps that must be completed
@@ -4087,56 +4122,6 @@ impl Escrow {
             (contract_id, resolution.code()),
         );
 
-        true
-    }
-
-    /// Returns the current arbiter dispute-split configuration.
-    ///
-    /// If no configuration has been stored yet, returns the protocol default:
-    /// `partial_refund_freelancer_bps = 3000`, `partial_refund_client_bps = 7000`.
-    pub fn get_arbiter_config(env: Env) -> DisputeConfig {
-        dispute::get_dispute_config(&env).unwrap_or_default()
-    }
-
-    /// Sets the arbiter dispute-split configuration. Admin-only.
-    ///
-    /// `freelancer_bps + client_bps` must equal exactly 10 000 and each value
-    /// must be `<= 10 000`. Takes effect immediately for the next dispute
-    /// resolution that uses `PartialRefund`.
-    ///
-    /// # Errors
-    /// * `NotInitialized` — contract not yet initialized.
-    /// * `UnauthorizedRole` — caller is not the stored admin.
-    /// * `InvalidProtocolParameters` — bps values fail the sum-to-10 000 check.
-    ///
-    /// # Events
-    /// `(Symbol("arbiter_cfg"),)` → `(freelancer_bps, client_bps, admin, timestamp)`
-    pub fn set_arbiter_config(env: Env, freelancer_bps: u32, client_bps: u32) -> bool {
-        Self::require_initialized(&env);
-        let admin: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .unwrap_or_else(|| env.panic_with_error(EscrowError::NotInitialized));
-        admin.require_auth();
-
-        if freelancer_bps > 10_000 || client_bps > 10_000 {
-            env.panic_with_error(types::EscrowError::InvalidProtocolParameters);
-        }
-        if freelancer_bps.saturating_add(client_bps) != 10_000 {
-            env.panic_with_error(types::EscrowError::InvalidProtocolParameters);
-        }
-
-        let config = DisputeConfig {
-            partial_refund_freelancer_bps: freelancer_bps,
-            partial_refund_client_bps: client_bps,
-        };
-        dispute::set_dispute_config(&env, config);
-
-        env.events().publish(
-            (Symbol::new(&env, "arbiter_cfg"),),
-            (freelancer_bps, client_bps, admin, env.ledger().timestamp()),
-        );
         true
     }
 }
