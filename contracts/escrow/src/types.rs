@@ -273,6 +273,8 @@ pub enum DataKey {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum EscrowError {
+    /// Contract ID must be non-zero.
+    InvalidContractId = 1,
     /// The specified milestone index is out of bounds.
     IndexOutOfBounds = 3,
     AlreadyReleased = 4,
@@ -542,6 +544,9 @@ pub struct DisputeSplit {
 }
 
 pub type SplitAmounts = DisputeSplit;
+
+/// Canonical contract error type alias for all entrypoint-facing errors.
+pub type Error = EscrowError;
 
 // ── Milestone schedule metadata ───────────────────────────────────────────
 

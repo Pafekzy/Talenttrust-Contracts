@@ -210,6 +210,8 @@ pub enum EscrowError {
     CommentTooLong = 43,
     /// Milestone rollback is not allowed in the current state.
     RollbackNotAllowed = 44,
+    /// Contract ID must be non-zero.
+    InvalidContractId = 45,
 }
 
 impl Escrow {
