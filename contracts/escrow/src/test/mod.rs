@@ -14,6 +14,7 @@ use crate::{
 // --- Submodules ---
 mod accounting_invariants;
 mod approval_expiry;
+mod arbiter_config_setter;
 mod bounds_validation;
 mod cancel_contract;
 mod batch_settlement;
