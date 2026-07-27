@@ -4,6 +4,7 @@ use crate::{
     safe_subtract_amounts, Contract, ContractStatus, ContractSummary, DataKey, Escrow, EscrowError,
     Milestone, MilestoneSummary, CONTRACT_SUMMARY_SCHEMA_VERSION,
 };
+use crate::settlement;
 
 /// Immutable metadata written when an escrow contract is closed.
 ///
@@ -35,31 +36,6 @@ impl Escrow {
 
     pub(crate) fn is_finalized(env: &Env, contract_id: u32) -> bool {
         storage::is_finalized(env, contract_id)
-    }
-
-    pub(crate) fn require_not_finalized(env: &Env, contract_id: u32) {
-        if Self::is_finalized(env, contract_id) {
-            env.panic_with_error(EscrowError::AlreadyFinalized);
-        }
-    }
-
-    pub(crate) fn require_not_paused(env: &Env) {
-        if env
-            .storage()
-            .persistent()
-            .get::<_, bool>(&DataKey::Paused)
-            .unwrap_or(false)
-        {
-            env.panic_with_error(EscrowError::ContractPaused);
-        }
-        if env
-            .storage()
-            .persistent()
-            .get::<_, bool>(&DataKey::Emergency)
-            .unwrap_or(false)
-        {
-            env.panic_with_error(EscrowError::EmergencyActive);
-        }
     }
 
     fn require_finalizer_role(env: &Env, contract: &Contract, finalizer: &Address) {

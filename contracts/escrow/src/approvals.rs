@@ -10,6 +10,7 @@
 //! `PENDING_APPROVAL_TTL_LEDGERS`. Missing or expired approvals fail closed.
 
 use crate::storage;
+use crate::authorization;
 use crate::ttl::{PENDING_APPROVAL_BUMP_THRESHOLD, PENDING_APPROVAL_TTL_LEDGERS};
 use crate::types::{
     Contract, ContractStatus, DataKey, Milestone, MilestoneApprovals, ReleaseAuthorization,
@@ -323,10 +324,7 @@ mod tests {
     fn arbiter_approval_key_preserves_existing_data_key_layout() {
         let typed_key = ArbiterApprovalKey::new(7, 2);
 
-        assert_eq!(
-            DataKey::from(typed_key),
-            DataKey::MilestoneApprovals(7, 2)
-        );
+        assert_eq!(DataKey::from(typed_key), DataKey::MilestoneApprovals(7, 2));
         assert_eq!(
             arbiter_approval_storage_key(7, 2),
             DataKey::MilestoneApprovals(7, 2)
@@ -392,10 +390,9 @@ mod tests {
                 }],
             );
             let _ = release_auth;
-            env.storage().persistent().set(
-                &DataKey::Milestones(contract_id),
-                &milestones,
-            );
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestones(contract_id), &milestones);
         });
     }
 
@@ -442,10 +439,9 @@ mod tests {
                     deadline: None,
                 }],
             );
-            env.storage().persistent().set(
-                &DataKey::Milestones(contract_id),
-                &milestones,
-            );
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestones(contract_id), &milestones);
 
             // Client approves
             let result = approve_milestone(&env, contract_id, 0, &client);
@@ -500,10 +496,9 @@ mod tests {
                     deadline: None,
                 }],
             );
-            env.storage().persistent().set(
-                &DataKey::Milestones(contract_id),
-                &milestones,
-            );
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestones(contract_id), &milestones);
 
             // Only client approves - insufficient
             let result = approve_milestone(&env, contract_id, 0, &client);
@@ -565,10 +560,9 @@ mod tests {
                     deadline: None,
                 }],
             );
-            env.storage().persistent().set(
-                &DataKey::Milestones(contract_id),
-                &milestones,
-            );
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestones(contract_id), &milestones);
 
             // First approval succeeds
             let result = approve_milestone(&env, contract_id, 0, &client);
