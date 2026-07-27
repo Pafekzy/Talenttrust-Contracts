@@ -103,9 +103,9 @@ pub use milestones::{Milestone, MilestoneApprovals, MilestoneSummary, ReleaseAut
 pub use types::{
     BatchSettlementResult, Contract, ContractBounds, ContractStatus, ContractSummary, DataKey,
     DepositMode, DisputeMetadata, DisputeMetadataV0, DisputeResolution, DisputeSplit, Error,
-    GovernedParameters, Milestone, MilestoneApprovals, MilestoneSummary, PendingAdminProposal,
-    ReadinessChecklist, ReleaseAuthorization, Reputation, SettlementItem, SplitAmounts,
-    CONTRACT_SUMMARY_SCHEMA_VERSION, DISPUTE_STORAGE_VERSION,
+    EventEntry, GovernedParameters, Milestone, MilestoneApprovals, MilestoneSummary,
+    PendingAdminProposal, ReadinessChecklist, ReleaseAuthorization, Reputation, SettlementItem,
+    SplitAmounts, CONTRACT_SUMMARY_SCHEMA_VERSION, DISPUTE_STORAGE_VERSION,
 };
 
 type Error = EscrowError;
@@ -4071,6 +4071,57 @@ impl Escrow {
         );
 
         true
+    }
+
+    /// Returns a paginated view of stored event records.
+    ///
+    /// Enumerates event records that were persisted by
+    /// [`events::emit_contract_indexed_event`] on every contract state change.
+    /// The result is a `Vec<EventEntry>` with at most `PAGE_CEILING` entries.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `start` - Zero-based index of the first event to return (inclusive).
+    ///   Values beyond the last event produce an empty page.
+    /// * `limit` - Maximum number of entries to return. Clamped to
+    ///   `PAGE_CEILING` internally.
+    ///
+    /// # Returns
+    /// A `Vec<EventEntry>` with at most `PAGE_CEILING` entries, ordered by
+    /// emission time (oldest first).
+    ///
+    /// # Examples
+    /// ```rust,ignore
+    /// let client = EscrowClient::new(&env, &contract_id);
+    /// let page = client.get_events_page(&0u32, &10u32);
+    /// ```
+    pub fn get_events_page(env: Env, start: u32, limit: u32) -> Vec<EventEntry> {
+        let event_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NextEventId)
+            .unwrap_or(0);
+
+        let effective_limit = if limit > PAGE_CEILING {
+            PAGE_CEILING
+        } else {
+            limit
+        };
+
+        let mut results: Vec<EventEntry> = Vec::new(&env);
+        if start >= event_count || effective_limit == 0 {
+            return results;
+        }
+
+        let count = core::cmp::min(effective_limit, event_count - start);
+        for i in 0..count {
+            let idx = start + i;
+            if let Some(entry) = env.storage().persistent().get(&DataKey::Event(idx)) {
+                results.push_back(entry);
+            }
+        }
+
+        results
     }
 }
 
